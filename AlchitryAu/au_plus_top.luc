@@ -1,0 +1,65 @@
+module au_plus_top (
+    input clk,              // 100MHz clock
+    input rst_n,            // reset button (active low)
+    output led [8],         // 8 user controllable LEDs
+    input usb_rx,           // USB->Serial input
+    output usb_tx,          // USB->Serial output
+    input cs,               // SPI chip select
+    input sdi,              // SPI data in
+    input sck,              // SPI SCK
+    output sdo              // SPI data out
+  ) {
+  
+  sig rst;                  // reset signal
+  
+
+  sig spi_to_alu_data[8];
+  sig alu_to_spi_data[8];
+  sig clr_alu;
+  sig alu_clk;
+  sig multiplicand[1200];
+  sig multiplier[1200];
+  sig product[1200];
+  sig quotient[1200];
+  sig dividend[1200];
+  sig divisor[1200];
+  sig start_calc;
+  
+  .clk(clk) {
+    // The reset conditioner is used to synchronize the reset signal to the FPGA
+    // clock. This ensures the entire FPGA comes out of reset at the same time.
+    reset_conditioner reset_cond;
+    .rst(rst){
+      
+
+      spi_peripheral mySpiPeripheral(.cs(cs), .sdi(sdi), .sck(sck), .data_in(alu_to_spi_data));
+      alu myAlu(.data_in(spi_to_alu_data), .clear(clr_alu), .alu_clk(alu_clk),//.sclk(mySpiPeripheral.alu_clk),
+        .quotient(quotient), .product(product));
+      division myDivision(.dividend(dividend), .divisor(divisor), .start(start_calc));
+      mulitiplication myMultiplication(.multiplicand(multiplicand), .start(start_calc), .multiplier(multiplier));
+    }
+
+  }
+  
+  always {
+    reset_cond.in = ~rst_n; // input raw inverted reset signal
+    rst = reset_cond.out;   // conditioned reset
+    
+    spi_to_alu_data = mySpiPeripheral.data_out;
+    alu_to_spi_data = myAlu.data_out;
+    clr_alu = mySpiPeripheral.start;
+    alu_clk = mySpiPeripheral.alu_clk;
+    product = myMultiplication.product;
+    multiplicand = myAlu.arg1_output;
+    multiplier = myAlu.arg2_output;
+    quotient = myDivision.quotient;
+    dividend = myAlu.arg1_output;
+    divisor = myAlu.arg2_output;
+    start_calc = myAlu.start_calc;
+    
+    led = myAlu.debug;             // use leds for debugging
+
+    usb_tx = usb_rx;        // echo the serial data
+    sdo = mySpiPeripheral.sdo;
+  }
+}

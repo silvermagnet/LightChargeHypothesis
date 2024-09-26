@@ -1,0 +1,69 @@
+module mulitiplication (
+    input clk,  // clock
+    input rst,  // reset
+    input start, // start calculation
+    input multiplicand[1200], //multiplicand
+    input multiplier[1200],  // multiplier
+    output product[1200]      //product
+  ) {
+  .clk(clk) {
+      .rst(rst) {
+        dff multiplier_reg[1200];    
+        dff multiplicand_reg[2400];    
+        dff product_reg[2400];      
+        dff iteration[16];      // number of bits
+        dff start_reg[2];          // keep track of rising edge of start signal
+      
+        fsm multiply_state = {INIT, START, ADDITION, SHIFT};
+
+      }
+  }
+  always {
+    product = product_reg.q[1199:0];
+    
+    
+    start_reg.d = c{start_reg.q[0], start}; // save old sck
+
+    if (start_reg.q == b10) { //falling edge
+      multiply_state.d = multiply_state.START;
+    }
+      
+    case (multiply_state.q){
+      
+      multiply_state.INIT:
+        iteration.d = 0;
+        
+      multiply_state.START:
+        multiplier_reg.d = multiplier;
+        product_reg.d = 0;
+        multiplicand_reg.d = c{1200h0, multiplicand};
+        multiply_state.d = multiply_state.ADDITION;
+        iteration.d = 0;
+        
+    
+      
+      multiply_state.ADDITION:      
+        if(iteration.q >= 16d1201){
+          multiply_state.d = multiply_state.INIT;
+        }
+        else{
+          if(multiplier_reg.q[0] == 1){
+            product_reg.d = product_reg.q + multiplicand_reg.q;
+          }
+          multiply_state.d = multiply_state.SHIFT;
+        }
+        iteration.d = iteration.q + 1;
+
+
+        
+      multiply_state.SHIFT:
+        multiplicand_reg.d = multiplicand_reg.q << 1;
+        multiplier_reg.d = multiplier_reg.q >> 1;
+
+        multiply_state.d = multiply_state.ADDITION;
+       
+        
+
+    }
+  }
+}

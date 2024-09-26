@@ -1,0 +1,4 @@
+pin sdi B49;
+pin sdo B46;
+pin cs B40;
+pin sck B43;

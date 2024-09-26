@@ -1,0 +1,132 @@
+/******************************************************************************
+
+   The MIT License (MIT)
+
+   Copyright (c) 2019 Alchitry
+
+   Permission is hereby granted, free of charge, to any person obtaining a copy
+   of this software and associated documentation files (the "Software"), to deal
+   in the Software without restriction, including without limitation the rights
+   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+   copies of the Software, and to permit persons to whom the Software is
+   furnished to do so, subject to the following conditions:
+
+   The above copyright notice and this permission notice shall be included in
+   all copies or substantial portions of the Software.
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+   THE SOFTWARE.
+
+   *****************************************************************************/
+
+module spi_peripheral #(
+    // clock polarity, 0 = inactive low, 1 = inactive high
+    CPOL = 0,// : CPOL == 0 || CPOL == 1,
+    
+    // clock phase, 0 = valid on leading edge, 1 = valid on trailing edge
+    CPHA = 0// : CPHA == 0 || CPHA == 1
+  )(
+    input clk,          // clock
+    input rst,          // reset
+    input cs,           // SPI chip select
+    input sdi,          // SPI data in
+    output sdo,         // SPI data out
+    input sck,          // SPI SCK
+    output start,        // transfer done
+    input data_in[8],   // data to send
+    output data_out[8], // data received
+    output alu_clk,      // alu clock
+    output debug[8]
+  ) {
+  
+  .clk(clk) {
+    .rst(rst) {
+      dff data_ready[3]; // after each word
+      dff data[8];       // received data
+    }
+    dff sdi_reg;         // input buffer
+    dff sdo_reg;         // output buffer
+    dff sck_reg[2];      // sck buffer
+    dff cs_reg;          // cs buffer
+    dff data_out_reg[8]; // data_out buffer
+    dff done_counter[16]; // check if full transmission is complete
+    dff start_reg;        // done buffer
+    dff alu_clk_reg;     // alu clk buffer
+    dff debug_reg[8];
+  }
+  
+  always {
+    debug = debug_reg.q;
+    // connect to buffer output
+    sdo = sdo_reg.q;
+    start = start_reg.q;
+    data_out = data_out_reg.q;
+    alu_clk = alu_clk_reg.q;
+    
+    // read in buffered inputs
+    cs_reg.d = cs;
+    sdi_reg.d = sdi;
+    sck_reg.d = c{sck_reg.q[0], sck}; // save old sck
+    
+    
+    if (cs_reg.q) { // not selected
+      done_counter.d = 16d4831;    // reset counter after 5 bytes sent from spi master in transmission command
+      data_ready.d = 8d7;     //reset word
+      data.d = data_in;        // copy in data for next byte
+      sdo_reg.d = data_in[7]; // write first bit out
+      
+    } else {
+    
+      
+      // When CPOL and CPHA are different, we read on the falling edge.
+      // When they are the same we read on the rising edge.
+      // Therefore we can use XOR to check that and invert the
+      // edge detector. If you XOR with 1, the bit is flipped. 
+      
+      if (sck_reg.q == (b01 ^ 2x{CPOL[0]^CPHA[0]})) { // reading edge
+        
+        if (done_counter.q == 16d4831){
+          start_reg.d = 1;   // signal we are starting
+          debug_reg.d = 1;
+        }
+        else{
+          start_reg.d = 0;    // do not send restart signal
+        }
+        // read in the bit
+        data_out_reg.d[data_ready.q] = sdi_reg.q;
+        
+        // turn on the alu clk
+        alu_clk_reg.d = 1;
+        
+        // increment the bit counters
+        done_counter.d = done_counter.q - 1;
+        data_ready.d = data_ready.q - 1;
+        
+        
+        
+        // if we read the last bit
+        if (data_ready.q == b0) {
+          data.d = data_in; // copy new data in
+          if(data_in != 0){
+            debug_reg.d = data_in;
+          }
+        }
+      } else if (sck_reg.q == (b10 ^ 2x{CPOL[0]^CPHA[0]})) { // writing edge
+      
+        // turn off the alu clk
+        alu_clk_reg.d = 0;
+        // write a bit out
+        sdo_reg.d = data.q[data_ready.q];
+        
+        //if (done_counter.q == 0){
+        //  done_reg.d = 1;   // signal we are done
+        //}
+      }
+    }
+  }
+}

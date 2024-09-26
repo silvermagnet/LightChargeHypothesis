@@ -1,0 +1,87 @@
+module division(
+    input clk,  // clock
+    input rst,  // reset
+    input start, // start calculation
+    input dividend[1200], //dividend
+    input divisor[1200],  // divisor
+    output quotient[1200]      //quotient
+    //output debug[8]          //debug
+  ) {
+
+  .clk(clk) {
+      .rst(rst) {
+        dff remainder[2400];    // remainder, should be double the num bits as dividend and divisor
+        dff divisor_reg[2400];    // divisor
+        dff quotient_reg[1200];      // quotient
+        dff iteration[16];      // number of bits
+        dff start_reg[2];          // keep track of rising edge of start signal
+        //dff debug_reg[8];
+        //dff debug_reg_large[1000];
+      
+        fsm divide_state = {INIT, START, SUBTRACTION, COMPARE, SHIFT_DIV_RIGHT};
+
+      }
+  }
+  always {
+    quotient = quotient_reg.q;
+    //debug = debug_reg.q;
+    
+    
+    start_reg.d = c{start_reg.q[0], start}; // save old sck
+
+    if (start_reg.q == b10) { //falling edge
+      divide_state.d = divide_state.START;
+    }
+      
+    case (divide_state.q){
+      
+      divide_state.INIT:
+        iteration.d = 0;
+        //debug_reg.d = quotient_reg.q[7:0];
+        
+      divide_state.START:
+        quotient_reg.d = 0;
+        divisor_reg.d = c{divisor, 1200h0};
+        remainder.d = c{1200h0, dividend};
+        divide_state.d = divide_state.SUBTRACTION;
+        iteration.d = 0;
+        
+    
+      
+      divide_state.SUBTRACTION:      
+        if(iteration.q > 16d1200){
+          divide_state.d = divide_state.INIT;
+        }
+        else{
+            remainder.d = remainder.q - divisor_reg.q;
+            divide_state.d = divide_state.COMPARE;
+            quotient_reg.d = quotient_reg.q << 1;
+
+        }
+        iteration.d = iteration.q + 1;
+
+
+        
+      divide_state.COMPARE:
+
+        if(remainder.q[2399] == 1b0){
+          quotient_reg.d[0] =  quotient_reg.q[0] | 1b1;
+        }
+        else{
+          remainder.d = remainder.q + divisor_reg.q;
+          quotient_reg.d[0] =  quotient_reg.q[0] & 1b0;
+        }
+        divide_state.d = divide_state.SHIFT_DIV_RIGHT;
+        
+      divide_state.SHIFT_DIV_RIGHT:
+        divisor_reg.d = divisor_reg.q >> 1;
+        divide_state.d = divide_state.SUBTRACTION;
+
+       
+        
+
+    }
+    
+    
+  
+  }

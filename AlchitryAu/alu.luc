@@ -1,0 +1,198 @@
+global Operation {
+  const LT    = 3d0;  // dest, op1, op2     : R[dest] = R[op1] < R[op2]
+  const EQ    = 3d1;  // dest, op1, op2     : R[dest] = R[op1] == R[op2]
+  const ADD   = 3d2;  // dest, op1, op2     : R[dest] = R[op1] + R[op2]
+  const SUB   = 3d3;  // dest, op1, op2     : R[dest] = R[op1] - R[op2]
+  const MUL   = 3d4;  // dest, op1, op2     : R[dest] = R[op1] * R[op2]
+  const DIV   = 3d5;  // dest, op1, op2     : R[dest] = R[op1] / R[op2]
+}
+
+global State {
+  const INIT = 16d0; // initialize and wait to start
+  const OPER = 16d1; // get the operand
+  const ARG1 = 16d7; // get the first argument
+  const ARG2 = 16d1207; // get the second argument
+  const CALC = 16d2407; // calculate result
+  const RESP = 16d3599; // read out response
+  const BUFFER = 16d4807; // finish zeroing out padding of 32 bits for spi driver
+  const DONE = 16d4831;// finished reading out response
+
+}
+
+
+
+module alu (
+    input clk,  // clock
+    input rst,  // reset
+    input alu_clk, // spi clock
+    input data_in[8],   // data received
+    output data_out[8],  //data to send
+    input product[1200],  // result from mulitiplication module
+    input quotient[1200],  // result from division module
+    output arg1_output[1200],    // dividend
+    output arg2_output[1200],      // divisor
+    input clear, // clear registers
+    output debug[8],
+    output start_calc  // after getting arg1 and arg2, start division
+  ) {
+
+  .clk(clk) {
+    .rst(rst) {
+      dff start_calc_reg;   // start division after getting args
+      dff alu_clk_reg[2];      // spi clk buffer
+      dff state[16];         //which state we're in
+      dff op[3];            //opcode
+      dff arg1[1200];          // argument 1
+      dff arg2[1200];          // argument 2
+      dff counter[16];       // counter to determine where we are in xfer
+      dff clear_reg;          // clear buffer
+      dff clear_counter[8];    //debug clear buffer
+      dff result[1200];      //store result
+      dff debug_reg[8];
+      dff arg_counter[8];    //bit position while reading from spi
+    }
+    dff data_out_reg[8]; // data_out buffer
+  }
+
+  
+  always {
+    debug = debug_reg.q;
+    arg1_output = arg1.q;
+    arg2_output = arg2.q;
+    start_calc = start_calc_reg.q;
+    
+    alu_clk_reg.d = c{alu_clk_reg.q[0], alu_clk}; // save old sck
+
+    if(clear){
+       clear_reg.d = 1b1;
+    }
+    
+    
+    
+
+    if(alu_clk_reg.q == b01) { 
+      
+      if(clear_reg.q == 1b1){
+        state.d = State.INIT; 
+        clear_reg.d = 1b0;
+        clear_counter.d = clear_counter.q + 1;
+
+
+      }
+        
+      
+      else{ 
+        case(state.q) {  
+          State.INIT:
+            start_calc_reg.d = 0;
+            counter.d = 1;
+            arg_counter.d = 0; 
+            arg1.d = 0;
+            arg2.d = 0;
+            op.d = 0;
+            state.d = State.OPER;
+          State.OPER:
+            op.d = data_in[2:0];
+            
+            if(counter.q == State.ARG1){
+              state.d = State.ARG1;
+              arg_counter.d = 8d2;
+            }
+            counter.d = counter.q + 1;
+            start_calc_reg.d = 0;
+           
+            
+          State.ARG1:
+            if(arg_counter.q == 7){
+              arg1.d = (arg1.q << 1200d8) | c{1192d0, data_in};
+              arg_counter.d = 0;  
+            }
+            else{
+              arg_counter.d = arg_counter.q + 1;
+            }
+            
+            
+            if(counter.q == State.ARG2){
+              state.d = State.ARG2;
+            }
+            counter.d = counter.q + 1;
+            
+            
+          State.ARG2:
+            
+
+            if(arg_counter.q == d7){
+              arg2.d = (arg2.q << 1200d8) | c{1192d0, data_in};
+              arg_counter.d = 0;  
+            }
+            else{
+              arg_counter.d = arg_counter.q + 1;
+            }
+            
+  
+            if(counter.q == State.CALC){
+              state.d = State.CALC;
+              start_calc_reg.d = 1;
+            }
+            counter.d = counter.q + 1;
+          State.CALC:
+            
+                  
+            start_calc_reg.d = 0;
+            arg_counter.d = 8d0;
+            
+            if(counter.q == State.RESP){
+              state.d = State.RESP;
+            }
+            counter.d = counter.q + 1;
+            debug_reg.d[7:0] = result.q[7:0];
+
+            
+            // Perform the operation
+            case (op.q) {
+              Operation.LT:
+                result.d = arg1.q < arg2.q;  // less-than comparison
+              Operation.EQ:
+                result.d = arg1.q == arg2.q; // equals comparison
+              Operation.ADD:
+                result.d = arg1.q + arg2.q;  // addition
+              Operation.SUB:
+                result.d = arg1.q - arg2.q;  // subtraction
+              Operation.MUL:
+                result.d = product;          // multiplication
+              Operation.DIV:
+                result.d = quotient;         // division
+              
+            }
+          State.RESP:
+            data_out_reg.d[7:0] = result.q[1199:1192];
+            if(arg_counter.q == 7){
+              result.d = result.q << 1200d8;
+              arg_counter.d = 0;
+            }
+            else{
+              arg_counter.d = arg_counter.q + 1;
+            }
+            
+            if(counter.q == State.BUFFER){
+              state.d = State.BUFFER;
+            }
+            counter.d = counter.q + 1;
+            
+          State.BUFFER:
+            data_out_reg.d[7:0] = 8d0;
+            
+            if(counter.q == State.DONE){
+              state.d = State.INIT;
+            }
+            counter.d = counter.q + 1;
+
+        }
+
+   
+      
+      }
+    }
+
+    data_out = data_out_reg.q;
+}
